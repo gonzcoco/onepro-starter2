@@ -3,47 +3,31 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
 export const runtime = "nodejs";
-
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2023-10-16",
 });
 
+// On lit le price côté serveur uniquement
+const PRICE_ID = process.env.STRIPE_PRICE_ID!; // <= IMPORTANT: "price_..."
+
 export async function POST(req: NextRequest) {
   try {
-    const {
-      proId,                 // l'ID du pro / user (obligatoire pour ton webhook)
-      priceId,               // ex: "price_123"
-      quantity = 1,
-      mode = "payment",      // "payment" (one-shot) ou "subscription"
-      planType = "starter",  // si tu veux les repasser au webhook
-      planTier = "basic",
-      earlyMinutes = 15,
-      channels = null,       // ex: ["sms","email"]
-    } = await req.json();
+    const { proId = "test-user-123", mode = "payment" } = await req.json().catch(() => ({}));
 
-    if (!proId) {
-      return NextResponse.json({ error: "Missing proId" }, { status: 400 });
-    }
-    if (!priceId) {
-      return NextResponse.json({ error: "Missing priceId" }, { status: 400 });
+    if (!PRICE_ID.startsWith("price_")) {
+      return NextResponse.json(
+        { error: `Bad STRIPE_PRICE_ID: ${PRICE_ID}` },
+        { status: 400 }
+      );
     }
 
     const session = await stripe.checkout.sessions.create({
-      mode, // "payment" ou "subscription"
-      line_items: [{ price: priceId, quantity }],
-
+      mode, // "payment" (one-shot) ou "subscription"
+      line_items: [{ price: PRICE_ID, quantity: 1 }],
       success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/cancel`,
-
-      // ——— très important pour le webhook ———
       client_reference_id: proId,
-      metadata: {
-        pro_id: proId,
-        plan_type: String(planType),
-        plan_tier: String(planTier),
-        early_minutes: String(earlyMinutes),
-        channels: channels ? JSON.stringify(channels) : "",
-      },
+      metadata: { pro_id: proId },
     });
 
     return NextResponse.json({ url: session.url }, { status: 200 });
